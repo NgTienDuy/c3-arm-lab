@@ -3,16 +3,33 @@ GCCOPTS=-D_GNU_SOURCE -Wall -std=gnu99 -O2 -pthread
 LINKOPTS=
 SRC=\
  MP.c\
+ MP+dmb.st+po.c\
+ MP+po+dmb.ld.c\
  MP+dmb.st+dmb.ld.c\
+ MP+dmbs.c\
+ MP+rel+acq.c\
+ MP+rel+acqpc.c\
+ MP+rel+po.c\
+ MP+dmb.st+addr.c\
  MP+dmb.st+ctrl.c\
+ MP+dmb.st+ctrlisb.c\
  SB.c\
+ SB+dmbs.c\
  SB+rel+acq.c\
  SB+rel+acqpc.c\
+ SB+swpal.c\
  LB.c\
- S.c\
+ LB+datas.c\
+ LB+ctrls.c\
  2+2W.c\
+ 2+2W+dmb.sts.c\
+ S.c\
+ S+dmb.st+data.c\
  R.c\
+ R+dmbs.c\
  IRIW.c\
+ IRIW+dmb.lds.c\
+ IRIW+addrs.c\
  CoRR.c\
 
 EXE=$(SRC:.c=.exe)
