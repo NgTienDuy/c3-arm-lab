@@ -1,0 +1,23 @@
+name: run
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: run
+        run: bash run.sh 2>&1 | tee run.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out-${{ matrix.os }}
+          path: |
+            run.log
+            out/
