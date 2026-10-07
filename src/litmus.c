@@ -93,6 +93,13 @@ static void sb0_rapc(int t, int i) { STL(x, 1); int a = LDAPR(y); R(0) = a; }
 static void sb1_rapc(int t, int i) { STL(y, 1); int a = LDAPR(x); R(0) = a; }
 static void sb0_swp(int t, int i) { SWP(x, 1); int a = LD(y); R(0) = a; }
 static void sb1_swp(int t, int i) { SWP(y, 1); int a = LD(x); R(0) = a; }
+#if !defined(__aarch64__)
+#define SBF(nm, ins) static void sb0_##nm(int t, int i) { ST(x, 1); asm volatile(ins ::: "memory"); int a = LD(y); R(0) = a; } \
+                     static void sb1_##nm(int t, int i) { ST(y, 1); asm volatile(ins ::: "memory"); int a = LD(x); R(0) = a; }
+SBF(lock, "lock addl $0, -4(%%rsp)")
+SBF(sfence, "sfence")
+SBF(lfence, "lfence")
+#endif
 
 // LB (load buffering): mỗi luồng đọc biến của luồng kia rồi ghi biến của mình. Yếu: cả hai đọc 1.
 static void lb0_po(int t, int i)   { int a = LD(x); ST(y, 1); R(0) = a; }
@@ -155,6 +162,11 @@ static const litmus T[] = {
   {"SB", "rel+acq",    K_SB, 2, {sb0_ra, sb1_ra}, "stlr rồi ldar (RCsc)"},
   {"SB", "rel+acqpc",  K_SB, 2, {sb0_rapc, sb1_rapc}, "stlr rồi ldapr (RCpc)"},
   {"SB", "swp",        K_SB, 2, {sb0_swp, sb1_swp}, "ghi bằng lệnh nguyên tử hoán đổi"},
+#if !defined(__aarch64__)
+  {"SB", "lockadd",    K_SB, 2, {sb0_lock, sb1_lock}, "lock add vào ngăn xếp làm rào"},
+  {"SB", "sfence",     K_SB, 2, {sb0_sfence, sb1_sfence}, "sfence giữa ghi và đọc"},
+  {"SB", "lfence",     K_SB, 2, {sb0_lfence, sb1_lfence}, "lfence giữa ghi và đọc"},
+#endif
   {"LB", "po",         K_LB, 2, {lb0_po, lb1_po}, "đọc người kia;ghi mình"},
   {"LB", "data",       K_LB, 2, {lb0_data, lb1_data}, "giá trị ghi phụ thuộc giá trị đọc"},
   {"LB", "ctrl",       K_LB, 2, {lb0_ctrl, lb1_ctrl}, "lệnh ghi nằm sau nhánh theo giá trị đọc"},
