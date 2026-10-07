@@ -200,6 +200,7 @@ static long batches;
 static int cpus[4];
 static unsigned char *DLY[4];       // độ trễ ngẫu nhiên trước thân phép thử
 static int dmax = 0;
+static int resetter = 0;            // RESET=t: luồng t đặt lại x, y sau mỗi mẻ (mặc định luồng 0)
 
 static void pin(int c) {
   cpu_set_t s; CPU_ZERO(&s); CPU_SET(c, &s);
@@ -251,10 +252,11 @@ static void *worker(void *arg) {
       f(t, i);
     }
     barrier();                       // mọi luồng xong mẻ
-    if (t == 0) {
+    if (t == 0)
       for (int i = 0; i < NI; i++) { int c = classify(i); hist[c]++; weak += is_weak(c); }
+    barrier();
+    if (t == resetter)               // luồng đặt lại bộ nhớ giữ các dòng ở trạng thái M khi mẻ sau bắt đầu
       for (int i = 0; i < NI; i++) X[i].v = Y[i].v = 0;
-    }
   }
   return NULL;
 }
@@ -273,6 +275,7 @@ int main(int argc, char **argv) {
   if (argc < 4 + nthreads) { fprintf(stderr, "cần %d CPU\n", nthreads); return 1; }
   for (int t = 0; t < nthreads; t++) cpus[t] = atoi(argv[4 + t]);
   if (getenv("DMAX")) dmax = atoi(getenv("DMAX"));
+  if (getenv("RESET")) resetter = atoi(getenv("RESET"));
   batches = (n + NI - 1) / NI;
   X = aligned_alloc(64, NI * sizeof(cell)); Y = aligned_alloc(64, NI * sizeof(cell));
   memset(X, 0, NI * sizeof(cell)); memset(Y, 0, NI * sizeof(cell));
@@ -291,7 +294,7 @@ int main(int argc, char **argv) {
   long total = batches * NI;
   printf("%s %-5s %-14s n=%ld cpu", ARCH, cur->test, cur->variant, total);
   for (int t = 0; t < nthreads; t++) printf("%c%d", t ? ',' : '=', cpus[t]);
-  printf(" dmax=%d  yếu: %ld (%.3g /triệu)  %.1fs\n", dmax, weak, 1e6 * weak / total,
+  printf(" reset=T%d dmax=%d  yếu: %ld (%.3g /triệu)  %.1fs\n", resetter, dmax, weak, 1e6 * weak / total,
          (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
   printf("  kết quả:");
   for (int c = 0; c < 16; c++) if (hist[c]) {
