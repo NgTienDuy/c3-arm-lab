@@ -1,29 +1,18 @@
 #!/bin/bash
-# run6 (C3.8): ghi model CPU; ARM: fplat (sửa), bản -mcpu=neoverse-n2; x86: lặp lại để gắn nhãn CPU
+# run7 (C3.12): số học trên ARM thật (Neoverse N2) và x86 của runner — đối chiếu với QEMU và [i7]
 set -u
 mkdir -p out
-A=$(uname -m)
-cd simd
-M=$(lscpu | grep -m1 "Model name" | sed 's/  */ /g')
-echo "$M" > ../out/c38b-cpu-$A.txt; lscpu >> ../out/c38b-cpu-$A.txt
-curl -sfL -o 130.mat https://engineering.case.edu/sites/default/files/130.mat && python3 mat2f32.py 130.mat X130_DE_time > /dev/null
-gcc -O2 fplat.c -o fplat && { echo "$M"; ./fplat 0; ./fplat 1; } > ../out/c38b-fplat-$A.txt 2>&1
-if [ "$A" = aarch64 ]; then
-  gcc -O3 -fno-tree-vectorize widths.c -o w0 && gcc -O3 widths.c -o w1 && gcc -O3 -march=armv8.2-a+sve widths.c -o w2 && gcc -O3 -mcpu=neoverse-n2 widths.c -o w3
-  { echo "$M"; ./w0 0 "vô hướng"; ./w1 0 "-O3 (NEON)"; ./w2 0 "-O3 -march=armv8.2-a+sve"; ./w3 0 "-O3 -mcpu=neoverse-n2"; } > ../out/c38b-widths-$A.txt 2>&1
-  objdump -d --no-show-raw-insn w3 | awk '/<saxpy>:/,/^$/' > ../out/c38b-saxpy-n2-$A.txt
-  gcc -O3 -fno-tree-vectorize -DSFX=_s -c conv_k.c -o c_s.o && gcc -O3 -DSFX=_v128 -c conv_k.c -o c_v128.o && gcc -O3 -mcpu=neoverse-n2 -DSFX=_vw -c conv_k.c -o c_vw.o && gcc -Ofast -mcpu=neoverse-n2 -DSFX=_fast -c conv_k.c -o c_fast.o
-  gcc -O2 conv.c c_s.o c_v128.o c_vw.o c_fast.o -o conv -lm && { echo "$M (tự động rộng nhất = -O3 -mcpu=neoverse-n2)"; ./conv 0 X130_DE_time.f32; } > ../out/c38b-conv-n2-$A.txt 2>&1
-  for f in conv_tapouter_vw conv_q15_vw conv_intr; do echo "## $f"; objdump -d --no-show-raw-insn conv | awk "/<$f>:/,/^\$/"; done > ../out/c38b-conv-dis-$A.txt
-else
-  gcc -O3 -fno-tree-vectorize widths.c -o w0 && gcc -O3 widths.c -o w1 && gcc -O3 -march=x86-64-v3 widths.c -o w2
-  { echo "$M"; ./w0 0 "vô hướng"; ./w1 0 "-O3 (SSE2)"; ./w2 0 "-O3 -march=x86-64-v3"; } > ../out/c38b-widths-$A.txt 2>&1
-  gcc -O2 -mavx2 align.c -o align && { echo "$M"; ./align 0; } > ../out/c38b-align-$A.txt 2>&1
-  gcc -O2 dot8.c -o dot8 && { echo "$M"; ./dot8 0; } > ../out/c38b-dot8-$A.txt 2>&1
-  gcc -O3 -fno-tree-vectorize -DSFX=_s -c conv_k.c -o c_s.o && gcc -O3 -DSFX=_v128 -c conv_k.c -o c_v128.o && gcc -O3 -march=x86-64-v3 -DSFX=_vw -c conv_k.c -o c_vw.o && gcc -Ofast -march=x86-64-v3 -DSFX=_fast -c conv_k.c -o c_fast.o
-  gcc -O2 conv.c c_s.o c_v128.o c_vw.o c_fast.o -o conv -lm && { echo "$M"; ./conv 0 X130_DE_time.f32; } > ../out/c38b-conv-$A.txt 2>&1
-  gcc -O2 -DSFX=_o2 -c kern_c.c -o k_o2.o && gcc -O3 -march=x86-64-v3 -DSFX=_v -c kern_c.c -o k_v.o && gcc -O3 -DSFX=_sse -c kern_c.c -o k_sse.o
-  gcc -O3 -mavx2 intr.c k_o2.o k_v.o k_sse.o -o intr && { echo "$M"; ./intr 0; } > ../out/c38b-intr-$A.txt 2>&1
-fi
+A=$(uname -m); M=$(lscpu | grep -m1 "Model name" | sed 's/  */ /g')
+{ echo "$M"; lscpu; gcc --version | head -1; ldd --version | head -1; } > out/c312-cpu-$A.txt
+cd c312
+( mkdir -p cwru && cd cwru && for n in 97 98 99 100 105 106 107 108 118 119 120 121 130 131 132 133; do
+    v=$(printf "X%03d_DE_time" $n); curl -sfL -o $n.mat https://engineering.case.edu/sites/default/files/$n.mat && python3 ../mat2f32.py $n.mat $v > /dev/null; done )
+gcc -O2 int/conv.c -o conv && gcc -O2 int/shift.c -o shift && gcc -O2 fp/fp754.c -o fp754 -lm && gcc -O2 fp/nan.c -o nan -lm
+{ echo "$M"; echo "== conv"; ./conv; echo "== shift"; ./shift; echo "== fp754 (NaN)"; ./fp754 | grep -E "0/0|sqrtf|Inf - Inf|nanf"; echo "== nan -O2"; ./nan; } > ../out/c312-intfp-$A.txt 2>&1
+{ echo "$M"; for f in "-O2" "-O2 -ffp-contract=off" "-O2 -march=native"; do gcc $f fp/fma.c -o fma_t -lm && echo "== gcc $f" && ./fma_t; done; } > ../out/c312-fma-$A.txt 2>&1
+gcc -O2 fp/libm_probe.c -o libm_probe -lm && { echo "$M"; ./libm_probe ../out/c312-libm-$A.bin; } > ../out/c312-libm-$A.txt 2>&1
+if [ "$A" = aarch64 ]; then gcc -O2 fp/denorm_a64.c -o denorm -lm; else gcc -O2 -mavx2 -mfma fp/denorm.c -o denorm -lm; fi
+{ echo "$M"; ./denorm 1; } > ../out/c312-denorm-$A.txt 2>&1
+gcc -O2 -fopenmp num/omp_sum.c -o omp_sum -lm && { echo "$M ($(nproc) CPU)"; ./omp_sum cwru; } > ../out/c312-omp-$A.txt 2>&1
 cd ..
-cat out/c38b-*-$A.txt | grep -v "^ *[0-9a-f]*:" | grep -v "^Flags" | head -120
+cat out/c312-*-$A.txt | head -150
