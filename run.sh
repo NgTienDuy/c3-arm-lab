@@ -1,18 +1,28 @@
 #!/bin/bash
-# run7 (C3.12): số học trên ARM thật (Neoverse N2) và x86 của runner — đối chiếu với QEMU và [i7]
-set -u
+# run8: C3.14 — khảo sát PMU trên runner: perf có đọc được bộ đếm phần cứng không?
+set -x
 mkdir -p out
-A=$(uname -m); M=$(lscpu | grep -m1 "Model name" | sed 's/  */ /g')
-{ echo "$M"; lscpu; gcc --version | head -1; ldd --version | head -1; } > out/c312-cpu-$A.txt
-cd c312
-( mkdir -p cwru && cd cwru && for n in 97 98 99 100 105 106 107 108 118 119 120 121 130 131 132 133; do
-    v=$(printf "X%03d_DE_time" $n); curl -sfL -o $n.mat https://engineering.case.edu/sites/default/files/$n.mat && python3 ../mat2f32.py $n.mat $v > /dev/null; done )
-gcc -O2 int/conv.c -o conv && gcc -O2 int/shift.c -o shift && gcc -O2 fp/fp754.c -o fp754 -lm && gcc -O2 fp/nan.c -o nan -lm
-{ echo "$M"; echo "== conv"; ./conv; echo "== shift"; ./shift; echo "== fp754 (NaN)"; ./fp754 | grep -E "0/0|sqrtf|Inf - Inf|nanf"; echo "== nan -O2"; ./nan; } > ../out/c312-intfp-$A.txt 2>&1
-{ echo "$M"; for f in "-O2" "-O2 -ffp-contract=off" "-O2 -march=native"; do gcc $f fp/fma.c -o fma_t -lm && echo "== gcc $f" && ./fma_t; done; } > ../out/c312-fma-$A.txt 2>&1
-gcc -O2 fp/libm_probe.c -o libm_probe -lm && { echo "$M"; ./libm_probe ../out/c312-libm-$A.bin; } > ../out/c312-libm-$A.txt 2>&1
-if [ "$A" = aarch64 ]; then gcc -O2 fp/denorm_a64.c -o denorm -lm; else gcc -O2 -mavx2 -mfma fp/denorm.c -o denorm -lm; fi
-{ echo "$M"; ./denorm 1; } > ../out/c312-denorm-$A.txt 2>&1
-gcc -O2 -fopenmp num/omp_sum.c -o omp_sum -lm && { echo "$M ($(nproc) CPU)"; ./omp_sum cwru; } > ../out/c312-omp-$A.txt 2>&1
-cd ..
-cat out/c312-*-$A.txt | head -150
+{
+uname -a; lscpu | head -25
+cat /proc/sys/kernel/perf_event_paranoid
+ls /sys/bus/event_source/devices/
+sudo dmesg 2>/dev/null | grep -i -E "pmu|perf|PMUv3" | head -20
+grep -o -w -E "arch_perfmon|pdcm|perfmon" /proc/cpuinfo | sort | uniq -c
+} > out/c314-probe-$(uname -m).txt 2>&1
+sudo apt-get update -qq >/dev/null 2>&1
+sudo apt-get install -y -qq linux-tools-common linux-tools-$(uname -r) >/dev/null 2>&1 || sudo apt-get install -y -qq linux-tools-azure >/dev/null 2>&1 || true
+sudo sysctl -w kernel.perf_event_paranoid=-1
+{
+which perf; perf --version
+perf list hw cache 2>&1 | head -40
+cat > /tmp/loop.c <<'C'
+#include <stdio.h>
+#include <stdlib.h>
+int main(int c, char **v) { long n = atol(v[1]); volatile double s = 0; for (long i = 0; i < n; i++) s += i * 0.5; printf("%f\n", s); return 0; }
+C
+gcc -O2 -o /tmp/loop /tmp/loop.c
+perf stat -e cycles,instructions,branches,branch-misses,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses -- /tmp/loop 300000000
+perf stat -e task-clock,context-switches,cpu-migrations,page-faults -- /tmp/loop 100000000
+perf record -e cycles -o /tmp/p.data -- /tmp/loop 200000000 && perf report -i /tmp/p.data --stdio | head -20
+} > out/c314-perf-$(uname -m).txt 2>&1
+cat out/*
