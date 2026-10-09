@@ -6,6 +6,8 @@
 //   chase   : 8 ldr x1,[x1] nối đuôi + subs + b.ne trên hoán vị vòng ngẫu nhiên ARG byte (mỗi nút một dòng 64 B) = 10 lệnh/vòng
 //   stream  : cộng dồn tuần tự ARG byte (C, -O2) — băng thông, bộ tiền nạp che độ trễ
 //   branch  : nhánh theo byte ngẫu nhiên, xác suất rẽ ARG/256 (asm: ldrb, cmp, b.lo, add, subs, b.ne)
+//   branchx : như branch nhưng bit ngẫu nhiên sinh tại chỗ bằng xorshift64 (không lặp lại) — so với branch, nơi 64 KiB byte
+//             ngẫu nhiên được dùng lại theo vòng (bộ dự đoán có thể học một chuỗi lặp lại)
 //   spin    : vòng chờ một cờ không bao giờ bật (ldr, cbnz, subs, b.ne = 4 lệnh/vòng) — "IPC cao mà không làm gì"
 //   sys     : N lần getppid() — lệnh chạy trong nhân
 //   phase   : N vòng chain rồi N/8 vòng chase 256 MiB — hai pha để thấy lỗi ngoại suy khi ghép kênh bộ đếm
@@ -71,6 +73,10 @@ int main(int argc, char **argv) {
       asm volatile("1:\n\tldrb w9,[%1],#1\n\tcmp x9,%3\n\tb.hs 2f\n\tadd %2,%2,#1\n2:\n\tsubs %0,%0,#1\n\tb.ne 1b"
                    : "+r"(kk), "+r"(p), "+r"(cnt) : "r"(thr) : "x9", "cc", "memory"); left -= k; }
     ctl("disable\n"); r = cnt; }
+  else if (!strcmp(m, "branchx")) { uint64_t x = 88172645463325252ull, cnt = 0, thr = arg; long k = n; ctl("enable\n");
+    asm volatile("1:\n\teor %1,%1,%1,lsl #13\n\teor %1,%1,%1,lsr #7\n\teor %1,%1,%1,lsl #17\n\tand x9,%1,#255\n\t"
+                 "cmp x9,%3\n\tb.hs 2f\n\tadd %2,%2,#1\n2:\n\tsubs %0,%0,#1\n\tb.ne 1b"
+                 : "+r"(k), "+r"(x), "+r"(cnt) : "r"(thr) : "x9", "cc"); ctl("disable\n"); r = cnt; }
   else if (!strcmp(m, "spin")) { volatile uint32_t flag = 0; const volatile uint32_t *f = &flag; ctl("enable\n");
     asm volatile("1:\n\tldr w9,[%1]\n\tcbnz w9,2f\n\tsubs %0,%0,#1\n\tb.ne 1b\n2:" : "+r"(n) : "r"(f) : "x9", "cc", "memory"); ctl("disable\n"); r = flag; }
   else
